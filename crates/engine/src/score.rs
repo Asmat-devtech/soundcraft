@@ -660,6 +660,27 @@ mod tests {
         let tiny = 1024;
         let err = svg_budgeted(&parts, &setup, tiny).unwrap_err();
         assert!(err.contains("score too large"), "{err}");
+
+        // MusicXML needs a budget that clears the header/part-list but trips in the measures, so
+        // the per-measure check is what refuses the document (this test used to fail on the
+        // part-list check alone).
+        let boundless = usize::MAX;
+        // The header plus part-list exactly as `parse` writes it, but with no measures: that is
+        // the size a budget must clear before the per-measure check is reached.
+        let header_parts: Vec<Part> = parts.iter().map(|p| Part { name: p.name.clone(), bass: p.bass, measures: Vec::new() }).collect();
+        let header = musicxml_budgeted(&header_parts, &setup, boundless).map_or(0, |x| x.len());
+        let full = musicxml_budgeted(&parts, &setup, boundless).map_or(0, |x| x.len());
+        assert!(header > 0, "the bare header fits any budget");
+        assert!(full > header, "the measures add output ({full} vs {header})");
+        // A budget above the bare header but below the completed document must be refused by the
+        // per-measure check.
+        let between = header.saturating_add((full.saturating_sub(header)) / 2);
+        assert!(between > header && between < full, "budget sits between header and document");
+        // The header alone fits that budget, so the refusal below comes from the measures.
+        assert!(musicxml_budgeted(&header_parts, &setup, between).is_ok(), "header fits the mid budget");
+        let err = musicxml_budgeted(&parts, &setup, between).unwrap_err();
+        assert!(err.contains("score too large"), "{err}");
+        // And a header that does not fit is refused before any measure is built.
         let err = musicxml_budgeted(&parts, &setup, tiny).unwrap_err();
         assert!(err.contains("score too large"), "{err}");
     }
