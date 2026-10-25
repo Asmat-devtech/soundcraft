@@ -754,8 +754,11 @@ pub fn trim_clip(s: &mut Session, id: ClipId, start: Option<Samples>, end: Optio
         lo = lo.max(0);
     }
     let file = |c: &Clip| {
-        let start = c.start.saturating_sub(c.source_offset());
-        material_len(s, c).map(|n| (start.min(c.start), start.saturating_add(n).max(c.end())))
+        // The mixer plays from `offset + rel / stretch`, so file samples span `stretch` times as many timeline samples.
+        let stretch = if c.stretch.is_finite() && c.stretch > 0.0 { c.stretch } else { 1.0 };
+        let scale = |n: Samples| if (stretch - 1.0).abs() >= 1e-9 { (n as f64 * stretch).round() as Samples } else { n };
+        let start = c.start.saturating_sub(scale(c.source_offset()));
+        material_len(s, c).map(|n| (start.min(c.start), start.saturating_add(scale(n)).max(c.end())))
     };
     let t = TimeCtx::of(s);
     let mut c = old.clone();
@@ -904,6 +907,25 @@ mod tests {
 
     fn clips(s: &Session, t: TrackId) -> Vec<(Samples, Samples, Samples)> {
         s.track(t).unwrap().clips().iter().map(|c| (c.start, c.length, c.source_offset())).collect()
+    }
+
+    #[test]
+    fn trim_clip_bounds_stretched_clip_to_its_file() {
+        for (stretch, length, want) in [(0.5, 5000, 5000), (2.0, 1000, 20_000)] {
+            let (mut s, t) = session_with_clip();
+            let id = {
+                let c = s.track_mut(t).and_then(|t| t.playlist_mut()).and_then(|p| p.clips.first_mut()).unwrap();
+                c.stretch = stretch;
+                c.start = 0;
+                c.length = length;
+                if let ClipContent::Audio { offset, .. } = &mut c.content {
+                    *offset = 0;
+                }
+                c.id
+            };
+            let c = trim_clip(&mut s, id, None, Some(99_999), false).unwrap();
+            assert_eq!(c.end(), want, "stretch {stretch}");
+        }
     }
 
     #[test]
