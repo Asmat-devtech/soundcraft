@@ -232,8 +232,23 @@ fn fill(bars: &[(i64, i64, u32, u32)], notes: &[(i64, i64, u8)]) -> Vec<Measure>
         if cursor < me {
             emit(cursor, me, &[], false, false, &mut items);
         }
-        // Truncate if we hit the cap.
+        // Cap the item count without shortening the measure: whatever suffix the cap discards is
+        // replaced with representable rests, so the bar's duration (and the SVG layout denominator)
+        // stays right. Shrinking the item list further makes room for those rests.
         if items.len() > MAX_ITEMS_PER_MEASURE {
+            let bar_len = me.saturating_sub(*ms);
+            let mut keep = MAX_ITEMS_PER_MEASURE;
+            loop {
+                let kept: i64 = items.iter().take(keep).map(|i| i64::from(i.units)).sum();
+                let rests = split_units(bar_len.saturating_sub(kept));
+                if keep.saturating_add(rests.len()) <= MAX_ITEMS_PER_MEASURE || keep == 0 {
+                    items.truncate(keep);
+                    items.extend(rests.into_iter().map(|units| Item { pitches: Vec::new(), units, tie_start: false, tie_stop: false }));
+                    break;
+                }
+                keep -= 1;
+            }
+            // Safety net for a hostile meter so wide that even whole-bar rests exceed the cap.
             items.truncate(MAX_ITEMS_PER_MEASURE);
         }
         measures.push(Measure { numerator: *num, denominator: *den, items });
@@ -683,6 +698,22 @@ mod tests {
         // And a header that does not fit is refused before any measure is built.
         let err = musicxml_budgeted(&parts, &setup, tiny).unwrap_err();
         assert!(err.contains("score too large"), "{err}");
+    }
+
+    #[test]
+    fn item_cap_keeps_the_measure_duration() {
+        // A 64/1 bar (256 sixteenths) with one note per sixteenth needs 256 items: over the cap.
+        // What the cap discards must come back as rests, so the bar still fills completely and the
+        // SVG layout denominator stays right.
+        let bars = vec![(0i64, 256i64, 64u32, 4u32)];
+        let notes: Vec<(i64, i64, u8)> = (0..256).map(|i| (i, i + 1, 60)).collect();
+        let measures = fill(&bars, &notes);
+        assert_eq!(measures.len(), 1);
+        let m = &measures[0];
+        assert!(m.items.len() <= MAX_ITEMS_PER_MEASURE, "capped at {MAX_ITEMS_PER_MEASURE}");
+        let total: u32 = m.items.iter().map(|i| i.units).sum();
+        assert_eq!(total, 256, "the bar still lasts 256 sixteenths");
+        assert!(m.items.iter().any(|i| i.pitches.is_empty()), "the discarded suffix became rests");
     }
 
     #[test]
