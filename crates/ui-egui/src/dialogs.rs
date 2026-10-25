@@ -406,6 +406,10 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
     audiosuite_window(app, ctx);
     crate::bounce::show(app, ctx);
     crate::import::show(app, ctx);
+    // Whichever window shows, closing Strip Silence drops its rectangles and stops their scan.
+    if !matches!(app.dialogs.open, Some(Dialog::StripSilence { .. } | Dialog::StripSilenceRename { .. })) {
+        app.dialogs.strip_rectangles = StripRectangles::default();
+    }
     let Some(mut d) = app.dialogs.open.take() else { return };
     let mut keep = true;
     let mut action: Option<(String, Value)> = None;
@@ -914,10 +918,7 @@ pub fn strip_silence_rectangles(app: &mut SoundApp, ctx: &egui::Context) -> Stri
     let values = match &app.dialogs.open {
         Some(Dialog::StripSilence { threshold, min_ms, pre_ms, post_ms }) => [*threshold, *min_ms, *pre_ms, *post_ms],
         Some(Dialog::StripSilenceRename { strip, .. }) => *strip,
-        _ => {
-            app.dialogs.strip_rectangles = StripRectangles::default();
-            return Arc::default();
-        }
+        _ => return Arc::default(),
     };
     let key: StripKey = (app.engine.revision, values.map(f64::to_bits));
     let r = &mut app.dialogs.strip_rectangles;
