@@ -30,7 +30,12 @@ fn the_audio_device_choice_is_kept_only_when_it_is_applied() {
 fn playback_engine_applies_the_same_device_choice_as_the_audio_command() {
     let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
     let before = app.ui.audio.clone();
+    let bit_depth = app.engine.session().bit_depth;
     assert!(!app.ui.show_playback_engine);
+
+    let r = app.run("setup.hardware", json!({})).unwrap();
+    assert_eq!(r["applied"], false, "without a player there is no open device");
+    assert_eq!(r["bit_depth"], json!(bit_depth));
 
     assert!(app.engine.session().edit.delay_compensation, "delay compensation starts on");
     let err = app.run("setup.playback_engine", json!({"buffer_size": 8, "delay_compensation": false})).unwrap_err();
@@ -45,16 +50,22 @@ fn playback_engine_applies_the_same_device_choice_as_the_audio_command() {
     assert!(app.engine.session().edit.delay_compensation, "a refused device change does not apply delay compensation");
     app.engine.transport.recording = false;
 
+    let err = app.run("setup.playback_engine", json!({"device": 42, "delay_compensation": false})).unwrap_err();
+    assert!(err.contains("`device` must be a string or null"), "{err}");
+    assert_eq!(app.ui.audio, before, "an invalid device changes nothing");
+    assert!(app.engine.session().edit.delay_compensation, "an invalid device does not apply delay compensation");
+
     let r = app.run("setup.playback_engine", json!({"buffer_size": 256, "delay_compensation": false})).unwrap();
     assert_eq!(app.ui.audio.buffer_size, Some(256));
     assert!(!app.engine.session().edit.delay_compensation);
     assert!(!app.ui.show_playback_engine, "a programmatic call does not open the window");
-    assert_eq!(r["applied"], true);
     assert_eq!(r["delay_compensation"], false);
     let player = app.player.as_ref().unwrap();
+    assert_eq!(r["applied"], !player.silent);
     assert_eq!(r["device"], json!(player.device_name));
     assert_eq!(r["buffer_size"], json!(player.device_buffer));
     assert_eq!(r["sample_rate"], player.device_rate);
+    assert_eq!(r["bit_depth"], json!(bit_depth));
 
     // 300 is in range and is not rounded onto the window's power-of-two list.
     let mut via_window_command = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());

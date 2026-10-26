@@ -630,11 +630,14 @@ pub fn audio_device_command(app: &mut SoundApp, p: &serde_json::Value) -> Result
 /// both go through [`audio_device_command`]. Delay compensation still goes through the engine
 /// command, and only after the device change has been accepted. The result is the open device:
 /// its name, the buffer actually in use (`device_buffer`, null for the device default), its sample
-/// rate, and delay compensation. `applied` is true because those figures are the live device.
+/// rate, and delay compensation. `applied` is true only when an audio device is open.
 pub fn setup_audio_command(app: &mut SoundApp, id: &str, p: &serde_json::Value) -> Result<serde_json::Value, String> {
     use serde_json::Value;
     let mut audio = serde_json::Map::new();
     if let Some(device) = p.get("device") {
+        if !device.is_null() && !device.is_string() {
+            return Err("`device` must be a string or null".into());
+        }
         audio.insert("output".to_string(), device.clone());
     }
     if let Some(buffer) = p.get("buffer_size") {
@@ -648,6 +651,7 @@ pub fn setup_audio_command(app: &mut SoundApp, id: &str, p: &serde_json::Value) 
     {
         app.engine.execute("setup.playback_engine", &json!({"delay_compensation": on})).map_err(|e| e.to_string())?;
     }
+    let applied = app.player.as_ref().is_some_and(|player| !player.silent);
     let (device, buffer_size, sample_rate) = match app.player.as_ref() {
         Some(player) => {
             let buffer = match player.device_buffer {
@@ -659,10 +663,11 @@ pub fn setup_audio_command(app: &mut SoundApp, id: &str, p: &serde_json::Value) 
         None => (Value::Null, Value::Null, json!(app.engine.session().sample_rate.hz())),
     };
     Ok(json!({
-        "applied": true,
+        "applied": applied,
         "device": device,
         "buffer_size": buffer_size,
         "sample_rate": sample_rate,
+        "bit_depth": app.engine.session().bit_depth,
         "delay_compensation": app.engine.session().edit.delay_compensation,
     }))
 }

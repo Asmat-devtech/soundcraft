@@ -188,8 +188,13 @@ fn buffer_param(id: &str, p: &Value) -> Result<BufferParam> {
 }
 
 /// `device` as `ui.audio_device`'s `output`: a name, or `null`/empty to clear. Absent leaves it.
-fn device_param(p: &Value) -> Option<Option<&str>> {
-    p.get("device").map(|v| v.as_str().filter(|s| !s.is_empty()))
+fn device_param<'a>(id: &str, p: &'a Value) -> Result<Option<Option<&'a str>>> {
+    match p.get("device") {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(Value::String(name)) => Ok(Some((!name.is_empty()).then_some(name.as_str()))),
+        Some(_) => Err(bad(id, "`device` must be a string or null")),
+    }
 }
 
 /// Headless `setup.hardware` / `setup.playback_engine`. Playback never reads `engine.device` or
@@ -197,7 +202,7 @@ fn device_param(p: &Value) -> Option<Option<&str>> {
 /// request. The result says `applied: false` and leaves `buffer_size` null until one was stored.
 fn engine_settings(e: &mut Engine, p: &Value, id: &str) -> Result<Value> {
     let buffer = buffer_param(id, p)?;
-    let device = device_param(p);
+    let device = device_param(id, p)?;
     if id == "setup.playback_engine"
         && let Some(on) = p.get("delay_compensation").and_then(Value::as_bool)
     {
@@ -682,6 +687,11 @@ mod tests {
         assert_eq!(e.session().edit.value("engine.buffer_size", -1.0), 300.0);
         assert_eq!(text(&e.session().edit, "engine.device").as_deref(), Some("Interface"));
         assert!(e.execute("setup.hardware", &json!({"buffer_size": "big"})).is_err());
+
+        let err = e.execute("setup.playback_engine", &json!({"device": 42, "delay_compensation": true})).unwrap_err();
+        assert!(err.to_string().contains("`device` must be a string or null"), "{err}");
+        assert!(!e.session().edit.delay_compensation, "an invalid device changes nothing");
+        assert_eq!(text(&e.session().edit, "engine.device").as_deref(), Some("Interface"));
 
         let r = e.execute("setup.hardware", &json!({"buffer_size": null, "device": ""})).unwrap();
         assert_eq!(r["applied"], false);
