@@ -3,6 +3,7 @@
 mod encode_format;
 mod float_headroom;
 mod malformed;
+mod mp4_length;
 mod roundtrip;
 mod stream;
 mod wav_empty_data;
