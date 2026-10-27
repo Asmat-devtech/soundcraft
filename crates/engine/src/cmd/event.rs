@@ -163,6 +163,8 @@ fn insert_time(e: &mut Engine, p: &Value) -> Result<Value> {
         if m.start >= r.start {
             m.start += r.len();
             m.end += r.len();
+        } else if m.end > r.start {
+            m.end += r.len();
         }
     }
     Ok(json!({"inserted": r.len()}))
@@ -190,6 +192,10 @@ fn cut_time(e: &mut Engine, p: &Value) -> Result<Value> {
         if m.start >= r.end {
             m.start -= r.len();
             m.end -= r.len();
+        } else if m.end >= r.end {
+            m.end -= r.len();
+        } else if m.end > r.start {
+            m.end = r.start;
         }
     }
     Ok(json!({"removed": r.len()}))
