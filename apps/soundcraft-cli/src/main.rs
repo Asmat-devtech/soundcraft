@@ -5,8 +5,10 @@
 //! soundcraft-cli convert IN OUT [--bit-depth 16|24|32f] [--rate HZ] [--normalize] [--dither | --no-dither]
 //!                                                 dithers only when the output loses resolution, unless told
 //! soundcraft-cli run [--in S.scraft | --demo] [--cmd ID[=JSON]]… [--bounce OUT] [--start T --end T] [--save S.scraft] [--inspect]
-//! soundcraft-cli script FILE [--in S | --demo] [--save S] [--bounce OUT [--start T --end T]]   (one `ID JSON` per line;
-//!                                                 without --start/--end, --bounce covers the whole session)
+//! soundcraft-cli script FILE [--in S | --demo] [--save S] [--bounce OUT [--start T --end T]] [--keep-going]
+//!                                                 one `ID JSON` per line; --bounce defaults to the whole session
+//!                                                 --keep-going continues after command errors, finishes requested
+//!                                                 output, and exits nonzero; malformed JSON stops immediately
 //! soundcraft-cli commands [FILTER]               list commands
 //! soundcraft-cli describe ID                     one command's details
 //! soundcraft-cli app [--port P] METHOD [JSON]     call a running app's control channel
@@ -391,6 +393,7 @@ fn script(args: &[String]) -> ExitCode {
         Err(err) => return fail(err),
     };
     let keep = args.iter().any(|a| a == "--keep-going");
+    let mut failed = false;
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
@@ -408,10 +411,12 @@ fn script(args: &[String]) -> ExitCode {
                 if !keep {
                     return ExitCode::FAILURE;
                 }
+                failed = true;
             }
         }
     }
-    finish(&mut e, args)
+    let result = finish(&mut e, args);
+    if failed { ExitCode::FAILURE } else { result }
 }
 
 fn commands(args: &[String]) -> ExitCode {
