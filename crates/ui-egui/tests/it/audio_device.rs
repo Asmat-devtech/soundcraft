@@ -26,9 +26,13 @@ fn the_audio_device_choice_is_kept_only_when_it_is_applied() {
     assert!(r["device"].is_object(), "{r}");
 }
 
+fn new_app() -> SoundApp {
+    SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default())
+}
+
 #[test]
-fn playback_engine_applies_the_same_device_choice_as_the_audio_command() {
-    let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+fn playback_engine_refuses_an_invalid_or_untimely_device_choice_without_side_effects() {
+    let mut app = new_app();
     let before = app.ui.audio.clone();
     let bit_depth = app.engine.session().bit_depth;
     assert!(!app.ui.show_playback_engine);
@@ -54,7 +58,12 @@ fn playback_engine_applies_the_same_device_choice_as_the_audio_command() {
     assert!(err.contains("`device` must be a string or null"), "{err}");
     assert_eq!(app.ui.audio, before, "an invalid device changes nothing");
     assert!(app.engine.session().edit.delay_compensation, "an invalid device does not apply delay compensation");
+}
 
+#[test]
+fn playback_engine_applies_the_device_choice_and_reports_the_open_device() {
+    let mut app = new_app();
+    let bit_depth = app.engine.session().bit_depth;
     let r = app.run("setup.playback_engine", json!({"buffer_size": 256, "delay_compensation": false})).unwrap();
     assert_eq!(app.ui.audio.buffer_size, Some(256));
     assert!(!app.engine.session().edit.delay_compensation);
@@ -66,9 +75,15 @@ fn playback_engine_applies_the_same_device_choice_as_the_audio_command() {
     assert_eq!(r["buffer_size"], json!(player.device_buffer));
     assert_eq!(r["sample_rate"], player.device_rate);
     assert_eq!(r["bit_depth"], json!(bit_depth));
+}
+
+#[test]
+fn playback_engine_applies_the_same_device_choice_as_the_audio_command() {
+    let mut app = new_app();
+    app.run("setup.playback_engine", json!({"delay_compensation": false})).unwrap();
 
     // 300 is in range and is not rounded onto the window's power-of-two list.
-    let mut via_window_command = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut via_window_command = new_app();
     via_window_command.run("ui.audio_device", json!({"buffer_size": 300, "output": "Elsewhere"})).unwrap();
     app.run("setup.hardware", json!({"buffer_size": 300, "device": "Elsewhere"})).unwrap();
     assert_eq!(app.ui.audio.buffer_size, Some(300));
