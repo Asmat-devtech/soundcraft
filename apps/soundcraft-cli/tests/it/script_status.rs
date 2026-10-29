@@ -85,5 +85,6 @@ fn successful_script_and_parsing_or_finish_failures_keep_their_status() {
     let both_fail = invoke(&dir.0, &["script", "engine.txt", "--keep-going", "--save", "parent/out.scraft"]);
     assert_eq!(both_fail.status.code(), Some(1));
     let errors = String::from_utf8_lossy(&both_fail.stderr);
-    assert!(errors.contains("session.save") && errors.contains("soundcraft-cli:"), "{errors}");
+    assert!(errors.contains("session.save") && errors.contains("parent"), "{errors}");
+    assert!(!errors.contains("script finished with command errors"), "{errors}");
 }
