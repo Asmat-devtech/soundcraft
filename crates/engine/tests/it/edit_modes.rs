@@ -433,3 +433,10 @@ fn cut_and_insert_time_move_the_end_of_a_spanning_selection_memory_location() {
     assert_eq!((m[a].start, m[a].end), (1000, 5000));
     assert_eq!((m[b].start, m[b].end), (1000, 2000));
 }
+
+#[test]
+fn moving_a_group_left_past_zero_keeps_its_spacing() {
+    let (mut e, t, ids) = long("slip", &[(500, 100, 0), (2000, 100, 0)]);
+    run(&mut e, "edit.move_clips", json!({"clips": [ids[0].0, ids[1].0], "by": -1000}));
+    assert_eq!(clips(&e, t), [(0, 100), (1500, 100)]);
+}
