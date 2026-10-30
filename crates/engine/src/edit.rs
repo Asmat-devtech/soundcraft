@@ -799,8 +799,11 @@ pub fn trim_clip(s: &mut Session, id: ClipId, start: Option<Samples>, end: Optio
         lo = lo.max(0);
     }
     let file = |c: &Clip| {
-        let start = c.start.saturating_sub(c.source_offset());
-        material_len(s, c).map(|n| (start.min(c.start), start.saturating_add(n).max(c.end())))
+        // The mixer plays from `offset + rel / stretch`, so file samples span `stretch` times as many timeline samples.
+        let stretch = if c.stretch.is_finite() && c.stretch > 0.0 { c.stretch } else { 1.0 };
+        let scale = |n: Samples| if (stretch - 1.0).abs() >= 1e-9 { (n as f64 * stretch).round() as Samples } else { n };
+        let start = c.start.saturating_sub(scale(c.source_offset()));
+        material_len(s, c).map(|n| (start.min(c.start), start.saturating_add(scale(n)).max(c.end())))
     };
     let t = TimeCtx::of(s);
     let mut c = old.clone();
