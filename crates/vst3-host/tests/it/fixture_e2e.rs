@@ -15,7 +15,7 @@ fn id_of(name: &str) -> String {
 fn scan_lists_both_audio_modules_but_not_the_controller_class() {
     let dir = fixture_dir();
     let found = soundcraft_vst3_host::scan_paths(&[dir.to_path_buf()]);
-    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found.len(), 5, "{found:?}");
     let g = found.iter().find(|d| d.name == "Fixture Gain").unwrap();
     // `uid()` lays out the first 8 bytes differently on Windows (COM GUID order).
     let want = if cfg!(windows) { "vst3:001D0A5C111122223333444455556666" } else { "vst3:5C0A1D00111122223333444455556666" };
@@ -161,6 +161,29 @@ fn synth_plays_notes_at_their_offsets() {
 }
 
 #[test]
+fn reset_after_all_notes_off_still_releases_held_voices() {
+    let mut p = soundcraft_vst3_host::create(&id_of("Fixture Synth")).unwrap();
+    p.prepare(48_000.0, 64, 2);
+    p.note_on(0, 60, 127);
+    let mut io = vec![vec![0.0f32; 64], vec![0.0f32; 64]];
+    p.process(&mut io, 64);
+    assert!((io[0][63] - 1.0).abs() < 1e-6, "the note sounds");
+    // Mixer::reset calls these two in a row on an instrument (stop / seek).
+    p.all_notes_off();
+    p.reset();
+    let mut io = vec![vec![9.0f32; 64], vec![9.0f32; 64]];
+    p.process(&mut io, 64);
+    assert!(io[0].iter().all(|x| x.abs() < 1e-6), "voice still sounding after reset: {}", io[0][63]);
+    // A reset alone also releases what the host still holds.
+    p.note_on(0, 61, 127);
+    p.process(&mut io, 64);
+    assert!((io[0][63] - 1.0).abs() < 1e-6);
+    p.reset();
+    p.process(&mut io, 64);
+    assert!(io[0].iter().all(|x| x.abs() < 1e-6), "voice still sounding after reset: {}", io[0][63]);
+}
+
+#[test]
 fn many_instances_create_and_drop_cleanly() {
     let (g, s) = (id_of("Fixture Gain"), id_of("Fixture Synth"));
     for _ in 0..50 {
@@ -286,6 +309,26 @@ fn host_set_controller_param_survives_state_round_trip() {
     let mut r = soundcraft_vst3_host::create(&id).unwrap();
     assert!(r.load_state(&q.save_state().unwrap()));
     assert!((r.param("12").unwrap() - 200.0).abs() < 0.01, "a loaded state replaces earlier edits: {:?}", r.param("12"));
+}
+
+#[test]
+fn layouts_beyond_the_host_limits_are_rejected_not_truncated() {
+    // Control: exactly at the limits (16 buses of 64 channels) activates and gets its full layout.
+    let mut p = soundcraft_vst3_host::create(&id_of("Fixture Wide 16x64")).unwrap();
+    p.prepare(44_100.0, 64, 2);
+    assert_eq!(p.latency(), 3);
+    let mut io = vec![vec![0.5f32; 64]; 2];
+    p.process(&mut io, 64);
+    assert!(io.iter().flatten().all(|&x| x == 1.0), "16x64 layout delivered as advertised: {:?}", &io[0][..4]);
+    // 17 buses, or a 65-channel bus: never activated, never processed with a cut-down layout.
+    for name in ["Fixture Wide 17 buses", "Fixture Wide 65 channels"] {
+        let mut p = soundcraft_vst3_host::create(&id_of(name)).unwrap();
+        p.prepare(44_100.0, 64, 2);
+        assert_eq!(p.latency(), 0, "{name}: not activated");
+        let mut io = vec![vec![0.5f32; 64]; 2];
+        p.process(&mut io, 64);
+        assert!(io.iter().flatten().all(|&x| x == 0.5), "{name}: the plugin never ran: {:?}", &io[0][..4]);
+    }
 }
 
 #[test]
