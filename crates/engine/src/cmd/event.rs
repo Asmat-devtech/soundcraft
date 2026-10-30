@@ -167,6 +167,11 @@ fn insert_time(e: &mut Engine, p: &Value) -> Result<Value> {
             m.end += r.len();
         }
     }
+    for (at, _) in &mut s.key_signatures {
+        if *at >= r.start {
+            *at = at.saturating_add(r.len());
+        }
+    }
     Ok(json!({"inserted": r.len()}))
 }
 
@@ -196,6 +201,12 @@ fn cut_time(e: &mut Engine, p: &Value) -> Result<Value> {
             m.end -= r.len();
         } else if m.end > r.start {
             m.end = r.start;
+        }
+    }
+    s.key_signatures.retain(|(at, _)| !r.contains(*at));
+    for (at, _) in &mut s.key_signatures {
+        if *at >= r.end {
+            *at -= r.len();
         }
     }
     Ok(json!({"removed": r.len()}))
