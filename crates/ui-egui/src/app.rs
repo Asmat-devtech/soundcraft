@@ -1,6 +1,10 @@
 use super::services::Services;
 use super::state::MainWindow;
-use super::*;
+use super::{
+    ControlRequest, Engine, Gesture, HashMap, MeterDisplay, OutputTrouble, Player, Range, Receiver, Samples, SoundApp, TrackId, TransportRequest,
+    Trouble, UiState, Value, VecDeque, bounce, dialogs, edit_window, extra_windows, fonts, import, json, menus, midi_editor, mix_window, ops_windows,
+    palette, panels, recovery, sampler_window, score_editor, shortcuts, theme, updates_ui, video_track, video_window, windows,
+};
 
 mod audio;
 mod commands;
@@ -172,7 +176,6 @@ impl SoundApp {
         if ctx.current_pass_index() == 0 {
             bounce::step(self, ctx);
             import::step(self, ctx);
-            #[cfg(not(target_arch = "wasm32"))]
             updates_ui::tick(self, ctx);
         }
         if !self.pointer_down {
@@ -336,7 +339,6 @@ impl SoundApp {
         score_editor::show(self, &ctx);
         palette::show(self, &ctx);
         dialogs::show(self, &ctx);
-        #[cfg(not(target_arch = "wasm32"))]
         updates_ui::show(self, &ctx);
         // The sampler's drop rects are current now, so route any captured drop in this pass.
         self.route_dropped_files();
