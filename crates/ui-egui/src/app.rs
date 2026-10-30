@@ -176,7 +176,6 @@ impl SoundApp {
         if ctx.current_pass_index() == 0 {
             bounce::step(self, ctx);
             import::step(self, ctx);
-            #[cfg(not(target_arch = "wasm32"))]
             updates_ui::tick(self, ctx);
         }
         if !self.pointer_down {
@@ -340,7 +339,6 @@ impl SoundApp {
         score_editor::show(self, &ctx);
         palette::show(self, &ctx);
         dialogs::show(self, &ctx);
-        #[cfg(not(target_arch = "wasm32"))]
         updates_ui::show(self, &ctx);
         // The sampler's drop rects are current now, so route any captured drop in this pass.
         self.route_dropped_files();
