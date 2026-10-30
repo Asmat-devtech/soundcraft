@@ -214,7 +214,13 @@ fn spell(pitch: u8) -> (char, i32, i32) {
 }
 
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.chars()
+        .filter(|c| matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'))
+        .collect::<String>()
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn note_type(units: u32) -> (&'static str, bool) {
@@ -557,5 +563,20 @@ mod tests {
         assert_eq!(x.matches("<measure ").count(), x.matches("</measure>").count());
         let s = svg(&parts, &setup);
         assert!(s.starts_with("<svg") && s.contains("<ellipse"));
+    }
+
+    #[test]
+    fn exports_drop_characters_xml_forbids() {
+        let e = crate::demo::demo_engine();
+        let mut parts = layout(e.session(), &[]);
+        parts[0].name = "Lead\u{1}1\u{FFFE}".to_string();
+        let mut setup = ScoreSetup::from_session(e.session());
+        setup.title = "T\u{2}itle".to_string();
+        setup.composer = "C\u{3}omp".to_string();
+        for out in [musicxml(&parts, &setup), svg(&parts, &setup)] {
+            let bad: Vec<char> =
+                out.chars().filter(|c| (*c < ' ' && !matches!(c, '\n' | '\t' | '\r')) || matches!(c, '\u{FFFE}' | '\u{FFFF}')).collect();
+            assert!(bad.is_empty(), "forbidden characters: {bad:?}");
+        }
     }
 }

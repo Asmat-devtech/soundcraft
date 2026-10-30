@@ -11,6 +11,7 @@ pub mod catalog_more;
 pub mod clip_group_file;
 pub mod cmd;
 pub mod demo;
+mod dirty;
 pub mod edit;
 pub mod file_access;
 pub mod inspect;
@@ -23,6 +24,8 @@ use soundcraft_time::Samples;
 use std::cell::Cell;
 use std::sync::Arc;
 
+use dirty::same_document;
+
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
 pub use soundcraft_model as model;
 
@@ -31,6 +34,22 @@ pub use soundcraft_model as model;
 /// plugin that has been used can crash when its module exit only runs from an exit handler.
 pub fn shutdown_plugin_hosts() {
     soundcraft_vst3_host::shutdown();
+}
+
+/// A new [`soundcraft_model::AutoName::id`] for a scheme in `s`: a hash of a counter, never 0 and
+/// not held by another scheme in `s`. Native builds seed the hash from the system, so each run of
+/// the app gives other ids.
+pub fn new_scheme_id(s: &Session) -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    loop {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let id = h.finish();
+        if id != 0 && !s.auto_names.values().any(|a| a.id == id) {
+            return id;
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -94,6 +113,8 @@ pub struct Clipboard {
     pub grid_offset: Samples,
     /// Copy Special › Automation: pasting it leaves the clips alone, in Shuffle mode too.
     pub automation_only: bool,
+    /// The Auto Rename schemes of the copied clips, keyed as in their `auto_name`.
+    pub auto_names: std::collections::BTreeMap<u64, soundcraft_model::AutoName>,
 }
 
 impl Clipboard {
@@ -101,6 +122,39 @@ impl Clipboard {
     pub fn of_range(s: &Session, range: soundcraft_time::Range) -> Clipboard {
         let line = s.edit.grid.line_at_or_before(range.start, s.sample_rate, &s.tempo, s.frame_rate);
         Clipboard { length: range.len(), grid_offset: range.start.saturating_sub(line), ..Clipboard::default() }
+    }
+
+    /// Keep a copy of the Auto Rename schemes that the copied clips use, as `s` holds them.
+    pub fn keep_auto_names(&mut self, s: &Session) {
+        self.auto_names = self.tracks.iter().flatten().filter_map(|c| c.auto_name).filter_map(|k| Some((k, s.auto_names.get(&k)?.clone()))).collect();
+    }
+
+    /// Before a paste into `s`: point the copied clips at schemes that `s` holds. A scheme that `s`
+    /// holds with the same [`AutoName::id`](soundcraft_model::AutoName::id), name, zeros and suffix
+    /// is used as it is, and its numbers count on. Any other goes into `s` under a new key, counting
+    /// on from where it was when it was copied.
+    pub fn adopt_auto_names(&mut self, s: &mut Session) {
+        let mut keys = std::collections::BTreeMap::new();
+        for (k, a) in &self.auto_names {
+            let held = s
+                .auto_names
+                .iter()
+                .find(|(_, h)| a.id != 0 && h.id == a.id && h.name == a.name && h.zeros == a.zeros && h.suffix == a.suffix)
+                .map(|(key, _)| *key);
+            let key = match held {
+                Some(key) => key,
+                None => {
+                    let key = s.alloc();
+                    s.auto_names.insert(key, a.clone());
+                    key
+                }
+            };
+            keys.insert(*k, key);
+        }
+        for c in self.tracks.iter_mut().flatten() {
+            c.auto_name = c.auto_name.and_then(|k| keys.get(&k).copied());
+        }
+        self.auto_names = keys.values().filter_map(|k| Some((*k, s.auto_names.get(k)?.clone()))).collect();
     }
 }
 
@@ -460,19 +514,6 @@ impl Engine {
     }
 }
 
-/// Equal apart from what changes without editing: the selection, the playhead and the zoom.
-fn same_document(saved: &Session, doc: &Session) -> bool {
-    let mut doc = doc.clone();
-    let (from, to) = (&saved.edit, &mut doc.edit);
-    to.selection = from.selection;
-    to.timeline_selection = from.timeline_selection;
-    to.selected_tracks.clone_from(&from.selected_tracks);
-    to.selected_clips.clone_from(&from.selected_clips);
-    to.playhead = from.playhead;
-    to.zoom = from.zoom;
-    *saved == doc
-}
-
 fn install_panic_hook() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -555,6 +596,33 @@ mod dirty_tests {
         assert!(e.is_dirty());
         e.undo();
         assert!(!e.is_dirty());
+    }
+
+    #[test]
+    fn dirty_state_follows_save_undo_and_redo_after_navigation() {
+        let mut e = Engine::default();
+        let track = e.session_mut().add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Mono, None);
+        e.mark_clean();
+        e.execute("mix.volume", &json!({"track": track.0, "db": -6.0})).unwrap();
+        assert!(e.is_dirty());
+        // A repeated check uses the revision cache.
+        assert!(e.is_dirty());
+        e.mark_clean();
+        assert!(!e.is_dirty());
+        e.execute("edit.select", &json!({"tracks": [track.0], "start": 100, "end": 200})).unwrap();
+        e.execute("transport.locate", &json!({"at": 300})).unwrap();
+        e.execute("view.zoom_in", &json!({})).unwrap();
+        assert!(!e.is_dirty());
+        assert!(e.undo());
+        assert!(e.is_dirty(), "undoing away from the saved fader value is dirty");
+        assert!(e.redo());
+        assert!(!e.is_dirty(), "redoing to the saved fader value is clean despite navigation changes");
+        e.execute("mix.volume", &json!({"track": track.0, "db": -12.0})).unwrap();
+        assert!(e.is_dirty());
+        assert!(e.undo());
+        assert!(!e.is_dirty());
+        assert!(e.redo());
+        assert!(e.is_dirty());
     }
 }
 
