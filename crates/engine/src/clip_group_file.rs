@@ -92,7 +92,7 @@ fn decode_group_audio(
         if !full.starts_with(dir)
             || Path::new(rel)
                 .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
+                .any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_)))
         {
             return Err(EngineError::BadParams(cmd_id.into(), format!("audio path escapes the group folder: {rel}")));
         }
@@ -262,6 +262,12 @@ mod tests {
         std::fs::write(&path, file.to_string()).unwrap();
         let r = e.execute("file.import_clip_groups", &json!({"path": path, "at": 1000, "track": "Bass"}));
         assert!(matches!(r, Err(crate::EngineError::BadParams(..))), "{r:?}");
+        for rel in file["audio"].as_object_mut().unwrap().values_mut() {
+            *rel = json!(dir.join("Wait... what_0.wav").to_string_lossy());
+        }
+        std::fs::write(&path, file.to_string()).unwrap();
+        let r = e.execute("file.import_clip_groups", &json!({"path": path, "at": 1000, "track": "Bass"}));
+        assert!(matches!(r, Err(crate::EngineError::BadParams(..))), "absolute paths are refused: {r:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
