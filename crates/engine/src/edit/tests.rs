@@ -383,3 +383,20 @@ fn trim_clip_bounds_stretched_clip_to_its_file() {
         assert_eq!(c.end(), want, "stretch {stretch}");
     }
 }
+
+#[test]
+fn trim_clip_start_bound_scales_the_offset_by_stretch() {
+    let (mut s, t) = session_with_clip();
+    let id = {
+        let c = s.track_mut(t).and_then(|t| t.playlist_mut()).and_then(|p| p.clips.first_mut()).unwrap();
+        c.stretch = 2.0;
+        c.start = 10_000;
+        c.length = 1000;
+        if let ClipContent::Audio { offset, .. } = &mut c.content {
+            *offset = 1000;
+        }
+        c.id
+    };
+    let c = trim_clip(&mut s, id, Some(0), None, false).unwrap();
+    assert_eq!(c.start, 8000);
+}
